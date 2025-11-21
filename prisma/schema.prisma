@@ -4,13 +4,13 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  // url      = env("DATABASE_URL")
+  url      = env("DATABASE_URL")
 }
 
 model Task {
   id      String  @id @default(uuid())
-  title   String
-  checked Boolean @default(false)
+  description   String
+  is_completed Boolean @default(false)
 
   @@map("tasks")
 }

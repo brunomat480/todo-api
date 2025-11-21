@@ -1,9 +1,15 @@
+import cors from '@fastify/cors';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { prisma } from "./lib/prisma.js";
 
 const fastify = Fastify({
   logger: true
 });
+
+fastify.register(cors, {
+  origin: '*',
+  methods: '*'
+})
 
 fastify.get('/tasks', async function (_request, reply: FastifyReply) {
   const tasks = await prisma.task.findMany()
@@ -12,23 +18,23 @@ fastify.get('/tasks', async function (_request, reply: FastifyReply) {
 });
 
 interface TaskBody {
-  title: string;
-  checked?: boolean;
+  description: string;
+  is_completed?: boolean;
 }
 
 fastify.post('/tasks', async function (request: FastifyRequest<{Body: TaskBody}>, reply: FastifyReply) {
   try {
-    const { title } = request.body;
+    const { description } = request.body;
 
-    if (!title) {
+    if (!description) {
       return reply.status(400).send({
-        error: 'title required'
+        error: 'description required'
       });
     }
 
     const task = await prisma.task.create({
       data: {
-        title: title,
+        description: description,
       }
     });
 
@@ -55,7 +61,6 @@ fastify.patch('/tasks/:id/toggle', async function(request: FastifyRequest<{Param
       });
     }
 
-
     const findTaks = await prisma.task.findFirst({
       where: {
         id
@@ -73,7 +78,7 @@ fastify.patch('/tasks/:id/toggle', async function(request: FastifyRequest<{Param
         id
       },
       data: {
-        checked: !findTaks.checked
+        is_completed: !findTaks.is_completed
       }
     });
 
@@ -108,13 +113,14 @@ fastify.delete('/tasks/:id', async function(request: FastifyRequest<{Params: Tas
 interface ChatBody {
   message: string;
 }
-
 interface Content {
   action: 'create' | 'delete' | 'complete';
-  id: string;
-  title: string;
-  checked: boolean;
   response: string;
+  data: {
+    id: string;
+    description: string;
+    is_completed: boolean;
+  }
 }
 
 interface Message {
@@ -150,13 +156,15 @@ fastify.post('/ai/chat', async function (request: FastifyRequest<{Body: ChatBody
     Interprete a solicitação do usuário e responda APENAS com um JSON no formato:
     {
       "action": "create" | "delete" | "complete" | "list",
-      "id": string,
-      "title": string,
       "response": string,
-      "checked": boolean
+      data: {
+        "id": string,
+        "description": string,
+        "is_completed": boolean
+      }
     }
 
-    Regras para o campo "checked":
+    Regras para o campo "is_completed":
     - Deve ser true quando a ação for "complete".
     - Deve ser false para ações "create", "delete", "list" e "chat".
 
@@ -207,8 +215,8 @@ fastify.post('/ai/chat', async function (request: FastifyRequest<{Body: ChatBody
       case 'create': {
         await prisma.task.create({
           data: {
-            title: choices.title,
-            checked: choices.checked
+            description: choices.data.description,
+            is_completed: choices.data.is_completed
           }
         });
 
@@ -217,10 +225,10 @@ fastify.post('/ai/chat', async function (request: FastifyRequest<{Body: ChatBody
       case 'complete': {
         await prisma.task.update({
           where: {
-            id: choices.id
+            id: choices.data.id
           },
           data: {
-            checked: choices.checked
+            is_completed: choices.data.is_completed
           }
         });
 
@@ -229,7 +237,7 @@ fastify.post('/ai/chat', async function (request: FastifyRequest<{Body: ChatBody
       case 'delete': {
         await prisma.task.delete({
           where: {
-            id: choices.id
+            id: choices.data.id
           }
         });
 
@@ -245,7 +253,7 @@ fastify.post('/ai/chat', async function (request: FastifyRequest<{Body: ChatBody
   }
 });
 
-fastify.listen({ port: 3000 }, function (err) {
+fastify.listen({ port: 3333 }, function (err) {
   if (err) {
     fastify.log.error(err)
     process.exit(1)
