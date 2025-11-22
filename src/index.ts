@@ -114,13 +114,13 @@ interface ChatBody {
   message: string;
 }
 interface Content {
-  action: 'create' | 'delete' | 'complete';
+  action: 'create' | 'delete' | 'complete' | 'list' | 'chat';
   response: string;
   data: {
     id: string;
     description: string;
     is_completed: boolean;
-  }
+  }[];
 }
 
 interface Message {
@@ -149,35 +149,109 @@ fastify.post('/ai/chat', async function (request: FastifyRequest<{Body: ChatBody
 
     const currentTasks = await prisma.task.findMany()
 
-    const prompt = `Você é um assistente que ajuda a gerenciar uma lista de tarefas.
+    const prompt = `Você é um assistente especializado em gerenciar lista de tarefas.
 
-    Tarefas atuais: ${JSON.stringify(currentTasks)}
+    TAREFAS ATUAIS DO USUÁRIO:
+    ${JSON.stringify(currentTasks, null, 2)}
 
-    Interprete a solicitação do usuário e responda APENAS com um JSON no formato:
+    INSTRUÇÕES GERAIS:
+    - Analise a solicitação do usuário e identifique a ação desejada
+    - Responda APENAS com um objeto JSON válido, sem texto adicional
+    - Use o formato exato abaixo:
+
+    FORMATO DA RESPOSTA:
     {
-      "action": "create" | "delete" | "complete" | "list",
-      "response": string,
-      data: {
-        "id": string,
-        "description": string,
-        "is_completed": boolean
-      }
+      "action": "create" | "delete" | "complete" | "list" | "chat",
+      "response": "string com mensagem apropriada",
+      "data": [
+        {
+          "id": "string",
+          "description": "string",
+          "is_completed": boolean
+        }
+      ]
     }
 
-    Regras para o campo "is_completed":
-    - Deve ser true quando a ação for "complete".
-    - Deve ser false para ações "create", "delete", "list" e "chat".
+    REGRAS DETALHADAS:
 
-    Reconheça sinônimos:
-    - criar / adicionar / incluir / nova tarefa
-    - excluir / remover / apagar / deletar
-    - concluir / finalizar / completar / marcar como feita
-    - listar / mostrar / ver tarefas
+    1. PARA AÇÃO "list":
+      - "response" deve listar TODAS as tarefas atuais no formato:
+        "1 - Descrição da tarefa (concluída)\n2 - Outra tarefa (pendente)"
+      - "data" deve conter o array COMPLETO de tarefas atuais
+      - "is_completed" deve manter os valores originais de cada tarefa
 
-    Para identificar qual tarefa, procure por nome similar ou posição.
+    2. PARA AÇÃO "create":
+      - "response": "Tarefa criada com sucesso"
+      - "data" deve conter APENAS a NOVA tarefa criada
+      - "is_completed": false para a nova tarefa
+      - Gere um "id" único (timestamp ou UUID simplificado)
 
-    Não é permitido executar ações envolvendo múltiplas tarefas na mesma requisição. Cada operação deve ser realizada individualmente.
-    Se o usuário mencionar mais de uma tarefa em uma única mensagem, o assistente deve retornar um aviso informando que apenas uma tarefa pode ser manipulada por vez.`;
+    3. PARA AÇÃO "delete":
+      - "response": "Tarefa(s) removida(s) com sucesso"
+      - "data" deve conter TODAS as tarefas que SERÃO REMOVIDAS
+      - Quando o usuário pedir para "deletar tudo", "limpar tudo", "remover todas as tarefas":
+        * "data" deve conter TODAS as tarefas atuais listadas acima
+      - Quando o usuário pedir para deletar tarefas específicas:
+        * Identifique as tarefas por posição, descrição similar ou ID
+        * "data" deve conter APENAS as tarefas identificadas
+      - NUNCA retorne "data" como array vazio [] para ações de delete
+      - Se não conseguir identificar tarefas específicas, inclua TODAS as tarefas atuais no "data"
+
+    4. PARA AÇÃO "complete":
+      - "response": "Tarefa concluída"
+      - "data" deve conter APENAS a tarefa que foi marcada como concluída
+      - "is_completed": true para a tarefa completada
+
+    5. PARA AÇÃO "chat":
+      - Use apenas quando for uma pergunta geral sobre tarefas
+      - "response": resposta textual à pergunta do usuário
+      - "data": array vazio []
+
+    RECONHECIMENTO DE SINÔNIMOS:
+    - CRIAR: "criar", "adicionar", "incluir", "nova tarefa", "adicionar nova"
+    - DELETAR: "excluir", "remover", "apagar", "deletar", "tirar", "limpar tudo", "deletar tudo", "remover todas"
+    - COMPLETAR: "concluir", "finalizar", "completar", "marcar como feita", "terminar"
+    - LISTAR: "listar", "mostrar", "ver tarefas", "quais são", "mostrar todas"
+
+    IDENTIFICAÇÃO DE TAREFAS:
+    - Por posição: "primeira", "segunda", "última", "número X"
+    - Por similaridade: compare a descrição solicitada com as tarefas existentes
+    - Por ID: se o usuário mencionar ID específico
+
+    EXEMPLOS:
+    Usuário: "Adicionar comprar leite"
+    Resposta: {
+      "action": "create",
+      "response": "Tarefa criada com sucesso",
+      "data": [
+        {
+          "id": "123456789",
+          "description": "comprar leite",
+          "is_completed": false
+        }
+      ]
+    }
+
+    Usuário: "Deletar tudo"
+    Resposta: {
+      "action": "delete",
+      "response": "Todas as tarefas removidas com sucesso",
+      "data": [
+        { "id": "1", "description": "Comprar pão", "is_completed": false },
+        { "id": "2", "description": "Estudar React", "is_completed": true }
+      ]
+    }
+
+    Usuário: "Listar minhas tarefas"
+    Resposta: {
+      "action": "list",
+      "response": "1 - Comprar pão (concluída: false)\n2 - Estudar React (concluída: true)",
+      "data": [
+        { "id": "1", "description": "Comprar pão", "is_completed": false },
+        { "id": "2", "description": "Estudar React", "is_completed": true }
+      ]
+    }
+    `;
 
     const response = await fetch(`${process.env.API_GROQ_BASE_URL}/chat/completions`, {
       method: 'POST',
@@ -187,6 +261,7 @@ fastify.post('/ai/chat', async function (request: FastifyRequest<{Body: ChatBody
       },
       body: JSON.stringify({
         model: process.env.MODEL_GROQ,
+        response_format: { type: "json_object" },
         messages: [
           {
             role: 'system',
@@ -199,11 +274,12 @@ fastify.post('/ai/chat', async function (request: FastifyRequest<{Body: ChatBody
         ]
       }),
     });
+
     const data: OpenAIResponse = await response.json();
 
     const raw = data.choices[0]?.message.content || '';
 
-    const jsonMatch = String(raw).match(/\{[\s\S]*\}/);
+    const jsonMatch = String(raw).match(/\{\s*"action"\s*:\s*"[^"]*"\s*,\s*"response"\s*:\s*"[^"]*"\s*,\s*"data"\s*:\s*\[[^\]]*\]\s*\}/);
 
     if (!jsonMatch) {
       throw new Error('Nenhum JSON válido encontrado na resposta da IA');
@@ -213,31 +289,53 @@ fastify.post('/ai/chat', async function (request: FastifyRequest<{Body: ChatBody
 
     switch (choices.action) {
       case 'create': {
-        await prisma.task.create({
-          data: {
-            description: choices.data.description,
-            is_completed: choices.data.is_completed
-          }
+        await prisma.task.createMany({
+          data: [
+            ...choices.data
+          ]
         });
 
         break;
       }
       case 'complete': {
-        await prisma.task.update({
-          where: {
-            id: choices.data.id
-          },
-          data: {
-            is_completed: choices.data.is_completed
-          }
-        });
+        const tasksAddCheck = choices.data
+          .filter(task => task.is_completed)
+          .map(task => task.id);
+
+        const tasksRemoveCheck = choices.data
+          .filter(task => !task.is_completed)
+          .map(task => task.id);
+
+        if (tasksAddCheck.length > 0) {
+          await prisma.task.updateMany({
+            where: {
+              id: {in: tasksAddCheck}
+            },
+            data: {
+              is_completed: true
+            }
+          });
+        }
+
+        if (tasksRemoveCheck.length > 0) {
+          await prisma.task.updateMany({
+            where: {
+              id: {in: tasksRemoveCheck}
+            },
+            data: {
+              is_completed: false
+            }
+          });
+        }
 
         break;
       }
       case 'delete': {
-        await prisma.task.delete({
+        const idsTasks = choices.data.map((task) => task.id);
+
+        await prisma.task.deleteMany({
           where: {
-            id: choices.data.id
+            id: {in: idsTasks}
           }
         });
 
