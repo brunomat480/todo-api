@@ -1,5 +1,6 @@
 import cors from '@fastify/cors';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
+import process from "node:process";
 import { prisma } from "./lib/prisma.js";
 
 const fastify = Fastify({
@@ -351,7 +352,7 @@ fastify.post('/ai/chat', async function (request: FastifyRequest<{Body: ChatBody
   }
 });
 
-fastify.listen({ port: 3333 }, function (err) {
+fastify.listen({ host: '0.0.0.0', port: 3333 }, function (err) {
   if (err) {
     fastify.log.error(err)
     process.exit(1)
